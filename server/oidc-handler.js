@@ -1,5 +1,7 @@
 // OIDC: authorization code flow (PKCE, state, nonce) against a single issuer via openid-client.
 const oidc = require("openid-client");
+const { R } = require("redbean-node");
+const { log } = require("../src/util");
 const User = require("./model/user");
 
 /**
@@ -146,17 +148,52 @@ class OIDCHandler {
 
     /**
      * Find the Kuma user for a verified identity.
+     * 1. An active user already linked to the identity.
+     * 2. If `autoLink` is on, the local user whose username equals `preferred_username`; the identity is linked to it.
+     * Accounts are never created, and an account that is already linked or has no password is never linked.
      * @param {object} config Config from oidc-config load()
-     * @param {{sub: string, issuer: string}} identity Result of handleCallback()
+     * @param {{sub: string, issuer: string, preferredUsername: ?string}} identity Result of handleCallback()
      * @returns {Promise<object>} The user
-     * @throws {OIDCError} If no account is linked to the identity
+     * @throws {OIDCError} If no account can be used for the identity
      */
     async resolveUser(config, identity) {
-        const user = await User.findByOIDC(identity.sub, identity.issuer);
-        if (!user) {
-            throw new OIDCError("no_account", "No account is linked to this identity", `sub=${identity.sub}`);
+        const linked = await User.findByOIDC(identity.sub, identity.issuer);
+        if (linked) {
+            return linked;
         }
-        return user;
+
+        const username = identity.preferredUsername?.trim();
+        if (config.autoLink && username) {
+            const user = await R.findOne("user", " TRIM(username) = ? AND active = 1 ", [username]);
+
+            // Exact match only: MariaDB collations are case-insensitive
+            if (user && user.username.trim() === username) {
+                if (user.oidc_sub) {
+                    throw new OIDCError(
+                        "already_linked",
+                        "This account is linked to a different identity",
+                        `user=${user.username} sub=${identity.sub}`
+                    );
+                }
+                if (!user.password) {
+                    throw new OIDCError(
+                        "password_required",
+                        "Set a password for this account before linking it",
+                        `user=${user.username}`
+                    );
+                }
+
+                await user.linkOIDC(identity.sub, identity.issuer);
+                log.info("oidc", `Linked identity ${identity.sub} to user ${user.username}`);
+                return user;
+            }
+        }
+
+        throw new OIDCError(
+            "no_account",
+            "No account is linked to this identity, contact the administrator",
+            `sub=${identity.sub}`
+        );
     }
 }
 

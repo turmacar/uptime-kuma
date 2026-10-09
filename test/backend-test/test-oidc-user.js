@@ -4,13 +4,14 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const dayjs = require("dayjs");
+const { OIDCHandler } = require("../../server/oidc-handler");
 
 dayjs.extend(require("dayjs/plugin/utc"));
 
 const MIGRATIONS = path.join(__dirname, "../../db/knex_migrations");
 const ISSUER = "https://auth.example.com/application/o/kuma/";
 
-describe("OIDC user model and migration", () => {
+describe("OIDC users: model, migration and resolution", () => {
     let R;
     let User;
     let tmpDir;
@@ -148,6 +149,80 @@ describe("OIDC user model and migration", () => {
         const stored = await R.findOne("user", " id = ? ", [alice.id]);
         assert.ok(stored.last_oidc_login);
         assert.strictEqual(stored.oidc_sub, "s1");
+    });
+
+    describe("resolveUser", () => {
+        const handler = new OIDCHandler();
+        const identity = (extra = {}) => ({ sub: "s1", issuer: ISSUER, preferredUsername: "alice", ...extra });
+
+        test("returns the user already linked to the identity", async () => {
+            const alice = await addUser("alice", { oidc_sub: "s1", oidc_issuer: ISSUER });
+            const user = await handler.resolveUser({ autoLink: false }, identity({ preferredUsername: "other" }));
+            assert.strictEqual(user.id, alice.id);
+        });
+
+        test("without autoLink an unlinked identity is rejected even if the username matches", async () => {
+            await addUser("alice");
+            await assert.rejects(handler.resolveUser({ autoLink: false }, identity()), (e) => e.code === "no_account");
+        });
+
+        test("autoLink links the user whose username matches and keeps the link", async () => {
+            const alice = await addUser("alice");
+            const user = await handler.resolveUser({ autoLink: true }, identity());
+            assert.strictEqual(user.id, alice.id);
+
+            const stored = await R.findOne("user", " id = ? ", [alice.id]);
+            assert.strictEqual(stored.oidc_sub, "s1");
+            assert.strictEqual(stored.oidc_issuer, ISSUER);
+
+            // Next login no longer needs autoLink
+            assert.strictEqual((await handler.resolveUser({ autoLink: false }, identity())).id, alice.id);
+        });
+
+        test("autoLink does not match a different username or a different case", async () => {
+            await addUser("alice");
+            for (const preferredUsername of ["bob", "Alice", "", null]) {
+                await assert.rejects(
+                    handler.resolveUser({ autoLink: true }, identity({ preferredUsername })),
+                    (e) => e.code === "no_account"
+                );
+            }
+        });
+
+        test("autoLink never takes over an account linked to another identity", async () => {
+            const alice = await addUser("alice", { oidc_sub: "s-original", oidc_issuer: ISSUER });
+            await assert.rejects(
+                handler.resolveUser({ autoLink: true }, identity({ sub: "s-attacker" })),
+                (e) => e.code === "already_linked"
+            );
+
+            const stored = await R.findOne("user", " id = ? ", [alice.id]);
+            assert.strictEqual(stored.oidc_sub, "s-original");
+        });
+
+        test("autoLink refuses an account without a password", async () => {
+            const alice = await addUser("alice", { password: null });
+            await assert.rejects(
+                handler.resolveUser({ autoLink: true }, identity()),
+                (e) => e.code === "password_required"
+            );
+
+            const stored = await R.findOne("user", " id = ? ", [alice.id]);
+            assert.strictEqual(stored.oidc_sub, null);
+        });
+
+        test("autoLink ignores inactive users", async () => {
+            await addUser("alice", { active: false });
+            await assert.rejects(handler.resolveUser({ autoLink: true }, identity()), (e) => e.code === "no_account");
+        });
+
+        test("an unknown identity never creates an account", async () => {
+            await assert.rejects(
+                handler.resolveUser({ autoLink: true }, identity({ preferredUsername: "newcomer" })),
+                (e) => e.code === "no_account"
+            );
+            assert.strictEqual((await R.getAll("SELECT id FROM `user`")).length, 0);
+        });
     });
 
     test("migration rolls back cleanly and can be re-applied", async () => {

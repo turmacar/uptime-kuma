@@ -31,7 +31,6 @@ function fromRaw(raw) {
         issuer: String(raw.oidc_issuer ?? "").trim(),
         redirectUri: String(raw.oidc_redirect_uri ?? "").trim(),
         scopes: parseScopes(raw.oidc_scopes),
-        autoRegister: raw.oidc_auto_register === true,
         autoLink: raw.oidc_auto_link === true,
         requireEmailVerified: raw.oidc_require_email_verified === true,
     };
@@ -146,7 +145,6 @@ async function save(input) {
         oidc_issuer: String(merged.issuer ?? "").trim(),
         oidc_redirect_uri: String(merged.redirectUri ?? "").trim(),
         oidc_scopes: merged.scopes.join(","),
-        oidc_auto_register: !!merged.autoRegister,
         oidc_auto_link: !!merged.autoLink,
         oidc_require_email_verified: !!merged.requireEmailVerified,
     });

@@ -16,7 +16,6 @@ describe("OIDC config: parsing and validation", () => {
     test("defaults are safe", () => {
         const config = oidcConfig.fromRaw({});
         assert.strictEqual(config.enabled, false);
-        assert.strictEqual(config.autoRegister, false);
         assert.strictEqual(config.autoLink, false);
         assert.strictEqual(config.requireEmailVerified, false);
         assert.deepStrictEqual(config.scopes, ["openid", "profile", "email"]);
