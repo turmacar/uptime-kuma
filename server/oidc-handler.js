@@ -1,0 +1,151 @@
+// OIDC: authorization code flow (PKCE, state, nonce) against a single issuer via openid-client.
+const oidc = require("openid-client");
+
+/**
+ * Error with a message that is safe to show to the user.
+ * Details for the server log go in `detail`.
+ */
+class OIDCError extends Error {
+    /**
+     * @param {string} code Machine readable code
+     * @param {string} message User facing message
+     * @param {?string} detail Extra detail for logs only
+     */
+    constructor(code, message, detail = null) {
+        super(message);
+        this.name = "OIDCError";
+        this.code = code;
+        this.detail = detail;
+    }
+}
+
+class OIDCHandler {
+    /** @type {?{key: string, client: object}} */
+    clientCache = null;
+
+    /**
+     * Drop the cached issuer/client, e.g. after the settings changed.
+     * @returns {void}
+     */
+    reset() {
+        this.clientCache = null;
+    }
+
+    /**
+     * Get an openid-client Client for the config, running discovery on first use.
+     * @param {object} config Config from oidc-config load()
+     * @returns {Promise<object>} openid-client Client
+     */
+    async getClient(config) {
+        const key = JSON.stringify([config.issuer, config.clientId, config.clientSecret, config.redirectUri]);
+        if (this.clientCache?.key === key) {
+            return this.clientCache.client;
+        }
+
+        let issuer;
+        try {
+            issuer = await oidc.Issuer.discover(config.issuer);
+        } catch (e) {
+            throw new OIDCError("discovery_failed", "Could not reach the identity provider", e.message);
+        }
+
+        const client = new issuer.Client({
+            client_id: config.clientId,
+            client_secret: config.clientSecret,
+            redirect_uris: [config.redirectUri],
+            response_types: ["code"],
+        });
+        client[oidc.custom.http_options] = () => ({ timeout: 10000 });
+        client[oidc.custom.clock_tolerance] = 5;
+
+        this.clientCache = { key, client };
+        return client;
+    }
+
+    /**
+     * Start a login. The caller must keep `checks` server side (session) until the callback.
+     * @param {object} config Config from oidc-config load()
+     * @returns {Promise<{url: string, checks: {state: string, nonce: string, codeVerifier: string}}>} Authorization URL and values to verify in the callback
+     */
+    async createAuthorization(config) {
+        const client = await this.getClient(config);
+        const checks = {
+            state: oidc.generators.state(),
+            nonce: oidc.generators.nonce(),
+            codeVerifier: oidc.generators.codeVerifier(),
+        };
+        const url = client.authorizationUrl({
+            scope: config.scopes.join(" "),
+            redirect_uri: config.redirectUri,
+            state: checks.state,
+            nonce: checks.nonce,
+            code_challenge: oidc.generators.codeChallenge(checks.codeVerifier),
+            code_challenge_method: "S256",
+        });
+        return { url, checks };
+    }
+
+    /**
+     * Finish a login: validates state, exchanges the code, and verifies the ID token
+     * (signature, issuer, audience, expiry, nonce).
+     * @param {object} config Config from oidc-config load()
+     * @param {object} query Query parameters of the callback request
+     * @param {{state: string, nonce: string, codeVerifier: string}} checks Values from createAuthorization()
+     * @returns {Promise<{sub: string, issuer: string, email: ?string, emailVerified: boolean, name: ?string, preferredUsername: ?string}>} Verified identity
+     * @throws {OIDCError} On any failure
+     */
+    async handleCallback(config, query, checks) {
+        if (!checks?.state || !checks?.nonce || !checks?.codeVerifier) {
+            throw new OIDCError("no_session", "Login session expired, please try again");
+        }
+
+        const client = await this.getClient(config);
+        const params = client.callbackParams({ method: "GET", url: "/?" + new URLSearchParams(query).toString() });
+
+        if (params.error) {
+            throw new OIDCError(
+                "provider_error",
+                "The identity provider rejected the login",
+                `${params.error}: ${params.error_description ?? ""}`
+            );
+        }
+
+        let tokenSet;
+        try {
+            tokenSet = await client.callback(config.redirectUri, params, {
+                state: checks.state,
+                nonce: checks.nonce,
+                code_verifier: checks.codeVerifier,
+                response_type: "code",
+            });
+        } catch (e) {
+            throw new OIDCError("invalid_callback", "Authentication failed, please try again", e.message);
+        }
+
+        const claims = tokenSet.claims();
+
+        if (!claims.sub) {
+            throw new OIDCError("no_sub", "Authentication failed, please try again", "ID token has no sub claim");
+        }
+
+        const emailVerified = claims.email_verified === true;
+        if (config.requireEmailVerified && !emailVerified) {
+            throw new OIDCError("email_not_verified", "Your email address is not verified at the identity provider");
+        }
+
+        return {
+            sub: claims.sub,
+            issuer: claims.iss,
+            email: claims.email ?? null,
+            emailVerified,
+            name: claims.name ?? null,
+            preferredUsername: claims.preferred_username ?? null,
+        };
+    }
+}
+
+module.exports = {
+    OIDCError,
+    OIDCHandler,
+    oidcHandler: new OIDCHandler(),
+};
