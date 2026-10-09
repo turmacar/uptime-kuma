@@ -144,7 +144,8 @@ const Database = require("./database");
 
 log.debug("server", "Importing Background Jobs");
 const { initBackgroundJobs, stopBackgroundJobs } = require("./jobs");
-const { loginRateLimiter, twoFaRateLimiter } = require("./rate-limiter");
+const { loginRateLimiter, twoFaRateLimiter, oidcRateLimiter } = require("./rate-limiter");
+const { createOIDCRouter, redeemOIDCTicket } = require("./routers/oidc-router");
 
 const { apiAuth } = require("./auth");
 const { login } = require("./auth");
@@ -376,6 +377,9 @@ let needSetup = false;
     const statusPageRouter = require("./routers/status-page-router");
     app.use(statusPageRouter);
 
+    // OIDC: login redirect flow
+    app.use(createOIDCRouter());
+
     // Universal Route Handler, must be at the end of all express routes.
     app.get("*", async (_request, response) => {
         if (_request.originalUrl.startsWith("/upload/")) {
@@ -439,6 +443,50 @@ let needSetup = false;
                 if (error.message) {
                     log.error("auth", error.message, `IP=${clientIP}`);
                 }
+                callback({
+                    ok: false,
+                    msg: "authInvalidToken",
+                    msgi18n: true,
+                });
+            }
+        });
+
+        // OIDC: exchange the one-time ticket from /auth/oidc/callback for a login token
+        socket.on("loginByOIDCTicket", async (ticket, callback) => {
+            if (typeof callback !== "function") {
+                return;
+            }
+
+            const clientIP = await server.getClientIP(socket);
+
+            if (!(await oidcRateLimiter.pass(callback))) {
+                log.info("auth", `Too many OIDC ticket requests. IP=${clientIP}`);
+                return;
+            }
+
+            try {
+                const user = await redeemOIDCTicket(ticket);
+
+                if (!user) {
+                    log.warn("auth", `Invalid OIDC ticket. IP=${clientIP}`);
+                    return callback({
+                        ok: false,
+                        msg: "authInvalidToken",
+                        msgi18n: true,
+                    });
+                }
+
+                await afterLogin(socket, user);
+                await user.recordOIDCLogin();
+
+                log.info("auth", `Successfully logged in user ${user.username} via OIDC. IP=${clientIP}`);
+
+                callback({
+                    ok: true,
+                    token: User.createJWT(user, server.jwtSecret),
+                });
+            } catch (error) {
+                log.error("auth", `OIDC ticket login failed: ${error.message}. IP=${clientIP}`);
                 callback({
                     ok: false,
                     msg: "authInvalidToken",

@@ -79,8 +79,17 @@ const twoFaRateLimiter = new KumaRateLimiter({
     errorMessage: "Too frequently, try again later.",
 });
 
+// OIDC: separate bucket so OIDC traffic cannot lock out the native login
+const oidcRateLimiter = new KumaRateLimiter({
+    tokensPerInterval: 30,
+    interval: "minute",
+    fireImmediately: true,
+    errorMessage: "Too frequently, try again later.",
+});
+
 module.exports = {
     loginRateLimiter,
     apiRateLimiter,
     twoFaRateLimiter,
+    oidcRateLimiter,
 };

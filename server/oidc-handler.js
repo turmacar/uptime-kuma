@@ -1,5 +1,6 @@
 // OIDC: authorization code flow (PKCE, state, nonce) against a single issuer via openid-client.
 const oidc = require("openid-client");
+const User = require("./model/user");
 
 /**
  * Error with a message that is safe to show to the user.
@@ -141,6 +142,21 @@ class OIDCHandler {
             name: claims.name ?? null,
             preferredUsername: claims.preferred_username ?? null,
         };
+    }
+
+    /**
+     * Find the Kuma user for a verified identity.
+     * @param {object} config Config from oidc-config load()
+     * @param {{sub: string, issuer: string}} identity Result of handleCallback()
+     * @returns {Promise<object>} The user
+     * @throws {OIDCError} If no account is linked to the identity
+     */
+    async resolveUser(config, identity) {
+        const user = await User.findByOIDC(identity.sub, identity.issuer);
+        if (!user) {
+            throw new OIDCError("no_account", "No account is linked to this identity", `sub=${identity.sub}`);
+        }
+        return user;
     }
 }
 
