@@ -29,6 +29,7 @@ import ReverseProxy from "./components/settings/ReverseProxy.vue";
 import Tags from "./components/settings/Tags.vue";
 import MonitorHistory from "./components/settings/MonitorHistory.vue";
 const Security = () => import("./components/settings/Security.vue");
+// OIDC: settings page
 const OIDC = () => import("./components/settings/OIDC.vue");
 import Proxies from "./components/settings/Proxies.vue";
 import About from "./components/settings/About.vue";
@@ -126,6 +127,7 @@ const routes = [
                                 component: Security,
                             },
                             {
+                                // OIDC: settings page
                                 path: "oidc",
                                 component: OIDC,
                             },
@@ -180,6 +182,7 @@ const routes = [
         component: SetupDatabase,
     },
     {
+        // OIDC: the server redirects here after the provider login
         path: "/oidc-callback",
         component: OIDCCallback,
     },

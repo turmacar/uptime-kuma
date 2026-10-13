@@ -112,6 +112,7 @@ export default {
                 security: {
                     title: this.$t("Security"),
                 },
+                // OIDC: settings page
                 oidc: {
                     title: this.$t("oidcMenu"),
                 },
