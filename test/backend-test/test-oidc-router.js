@@ -1,6 +1,7 @@
 const { describe, test, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert");
 const express = require("express");
+const { log } = require("../../src/util");
 const { OIDCHandler, OIDCError } = require("../../server/oidc-handler");
 const { ExpiringStore } = require("../../server/oidc-store");
 const { createOIDCRouter, redeemOIDCTicket } = require("../../server/routers/oidc-router");
@@ -14,6 +15,7 @@ describe("OIDC router", () => {
     const handler = new OIDCHandler();
     const tickets = new ExpiringStore({ ttlMs: 60000, maxEntries: 10 });
     let allow;
+    let logged;
 
     before(async () => {
         await provider.start();
@@ -24,20 +26,30 @@ describe("OIDC router", () => {
                 loadConfig: async () => ({ config, errors: [] }),
                 tickets,
                 limiter: { pass: async () => allow },
+                getClientIP: async () => "203.0.113.7",
             })
         );
         await new Promise((resolve) => {
             app.server = app.listen(0, "127.0.0.1", resolve);
         });
         base = `http://127.0.0.1:${app.server.address().port}`;
+
+        // Capture every log line instead of printing it
+        for (const level of ["debug", "info", "warn", "error"]) {
+            log[level] = (...args) => logged.push(args.map(String).join(" "));
+        }
     });
 
     after(() => {
+        for (const level of ["debug", "info", "warn", "error"]) {
+            delete log[level];
+        }
         provider.stop();
         app.server.close();
     });
 
     beforeEach(() => {
+        logged = [];
         allow = true;
         provider.claims = {};
         provider.tokenRequests = 0;
@@ -245,6 +257,53 @@ describe("OIDC router", () => {
         const res = await get(`/auth/oidc/callback?code=good-code&state=${state}`, cookie);
         assert.strictEqual(fragment(res).get("error"), "email_not_verified");
         assert.strictEqual(tickets.entries.size, 0);
+    });
+
+    test("audit log lines carry the client IP and the failure code", async () => {
+        const { state, cookie } = await startLogin();
+        await get(`/auth/oidc/callback?code=good-code&state=${state}`, cookie);
+        await get("/auth/oidc/callback?code=good-code&state=unknown", cookie);
+
+        const has = (...parts) => logged.some((line) => parts.every((p) => line.includes(p)));
+        assert.ok(has("Login started", "IP=203.0.113.7"), logged.join("\n"));
+        assert.ok(has("Identity verified for user me", "IP=203.0.113.7"), logged.join("\n"));
+        assert.ok(has("Login failed (no_session)", "IP=203.0.113.7"), logged.join("\n"));
+    });
+
+    test("logs never contain the state, code, ticket, cookie value or client secret", async () => {
+        config.clientSecret = "s3cr3t-client-value";
+        const { state, cookie } = await startLogin();
+        const res = await get(`/auth/oidc/callback?code=good-code&state=${state}`, cookie);
+        const ticket = fragment(res).get("ticket");
+        assert.ok(ticket);
+
+        const output = logged.join("\n");
+        const secrets = [
+            state,
+            "good-code",
+            ticket,
+            cookie.split("=")[1],
+            config.clientSecret,
+            provider.expected.nonce,
+            provider.expected.challenge,
+        ];
+        for (const secret of secrets) {
+            assert.ok(!output.includes(secret), `log contains ${secret}`);
+        }
+    });
+
+    test("provider error text cannot forge or flood log lines", async () => {
+        const { state, cookie } = await startLogin();
+        const description = "x\n2026-01-01 [AUTH] INFO: Successfully logged in user admin\r" + "A".repeat(5000);
+        await get(
+            `/auth/oidc/callback?error=access_denied&error_description=${encodeURIComponent(description)}&state=${state}`,
+            cookie
+        );
+
+        const line = logged.find((l) => l.includes("provider_error"));
+        assert.ok(line);
+        assert.ok(!/[\r\n]/.test(line));
+        assert.ok(line.length < 500, `line is ${line.length} characters`);
     });
 
     test("an unexpected error is reported as server_error", async () => {

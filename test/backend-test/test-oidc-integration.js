@@ -113,7 +113,7 @@ describe("OIDC integration", () => {
 
         tickets = oidcTickets;
         const app = express();
-        app.use(createOIDCRouter({ limiter: { pass: async () => true } }));
+        app.use(createOIDCRouter({ limiter: { pass: async () => true }, getClientIP: async () => "127.0.0.1" }));
         await new Promise((resolve) => {
             httpServer = app.listen(0, "127.0.0.1", resolve);
         });

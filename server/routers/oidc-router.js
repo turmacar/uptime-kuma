@@ -53,12 +53,34 @@ function stringParams(query) {
 }
 
 /**
+ * Make provider-controlled text safe for one log line (no line breaks, bounded length).
+ * @param {any} text Text to clean
+ * @returns {string} Single-line text
+ */
+function forLog(text) {
+    return String(text ?? "")
+        .replace(/[\u0000-\u001f\u007f]+/g, " ")
+        .slice(0, 300);
+}
+
+/**
+ * Client IP, honouring the trusted proxy setting like the socket logins do.
+ * @param {express.Request} req Request
+ * @returns {Promise<string>} IP address
+ */
+async function defaultClientIP(req) {
+    const { UptimeKumaServer } = require("../uptime-kuma-server");
+    return await UptimeKumaServer.getInstance().getClientIPwithProxy(req.socket.remoteAddress, req.headers);
+}
+
+/**
  * Create the OIDC router. Dependencies can be replaced in tests.
  * @param {object} options Overrides
  * @param {object} options.handler OIDC handler
  * @param {Function} options.loadConfig Returns `{config}` like oidc-config load()
  * @param {object} options.tickets Store receiving the one-time tickets
  * @param {object} options.limiter Rate limiter with a `pass()` method
+ * @param {Function} options.getClientIP Resolves the client IP of a request for the log
  * @returns {express.Router} Router handling /auth/oidc/*
  */
 function createOIDCRouter({
@@ -66,6 +88,7 @@ function createOIDCRouter({
     loadConfig = () => oidcConfig.load(),
     tickets = oidcTickets,
     limiter = oidcRateLimiter,
+    getClientIP = defaultClientIP,
 } = {}) {
     const router = express.Router();
     // Pending logins keyed by `state`; the cookie binds each one to the browser that started it.
@@ -115,6 +138,7 @@ function createOIDCRouter({
 
     router.get("/auth/oidc/login", async (req, res) => {
         const config = req.oidcConfig;
+        const ip = await getClientIP(req);
         try {
             const { url, checks } = await handler.createAuthorization(config);
             const binding = crypto.randomBytes(32).toString("base64url");
@@ -127,16 +151,17 @@ function createOIDCRouter({
                 path: COOKIE_PATH,
                 maxAge: PENDING_TTL_MS,
             });
-            log.info("oidc", "Login started");
+            log.info("oidc", `Login started. IP=${ip}`);
             res.redirect(url);
         } catch (e) {
-            log.warn("oidc", `Could not start the login: ${e.detail ?? e.message}`);
+            log.warn("oidc", `Could not start the login: ${forLog(e.detail ?? e.message)}. IP=${ip}`);
             finish(res, { error: e instanceof OIDCError ? e.code : "server_error" });
         }
     });
 
     router.get("/auth/oidc/callback", async (req, res) => {
         const config = req.oidcConfig;
+        const ip = await getClientIP(req);
         res.clearCookie(COOKIE_NAME, { path: COOKIE_PATH });
 
         try {
@@ -151,14 +176,14 @@ function createOIDCRouter({
             const user = await handler.resolveUser(config, identity);
 
             const ticket = tickets.putRandom({ userID: user.id });
-            log.info("oidc", `Identity verified for user ${user.username}`);
+            log.info("oidc", `Identity verified for user ${forLog(user.username)}. IP=${ip}`);
             finish(res, { ticket });
         } catch (e) {
             if (e instanceof OIDCError) {
-                log.warn("oidc", `Login failed (${e.code}): ${e.detail ?? e.message}`);
+                log.warn("oidc", `Login failed (${e.code}): ${forLog(e.detail ?? e.message)}. IP=${ip}`);
                 finish(res, { error: e.code });
             } else {
-                log.error("oidc", "Login failed: " + e.message);
+                log.error("oidc", `Login failed: ${forLog(e.message)}. IP=${ip}`);
                 finish(res, { error: "server_error" });
             }
         }
