@@ -147,6 +147,40 @@ class OIDCHandler {
     }
 
     /**
+     * Run discovery against an issuer URL and report what the provider offers. Stores nothing.
+     * @param {string} issuerUrl Issuer URL to check
+     * @returns {Promise<{issuer: string, authorizationEndpoint: ?string, tokenEndpoint: ?string, warnings: string[]}>} Provider summary; `warnings` holds codes such as `issuer_mismatch`
+     * @throws {OIDCError} If discovery fails
+     */
+    async testConnection(issuerUrl) {
+        let issuer;
+        try {
+            issuer = await oidc.Issuer.discover(issuerUrl);
+        } catch (e) {
+            throw new OIDCError("discovery_failed", "Could not reach the identity provider", e.message);
+        }
+
+        const metadata = issuer.metadata;
+        const warnings = [];
+        if (metadata.issuer !== issuerUrl) {
+            warnings.push("issuer_mismatch");
+        }
+        if (metadata.grant_types_supported && !metadata.grant_types_supported.includes("authorization_code")) {
+            warnings.push("authorization_code_not_supported");
+        }
+        if (metadata.code_challenge_methods_supported && !metadata.code_challenge_methods_supported.includes("S256")) {
+            warnings.push("pkce_not_supported");
+        }
+
+        return {
+            issuer: metadata.issuer,
+            authorizationEndpoint: metadata.authorization_endpoint ?? null,
+            tokenEndpoint: metadata.token_endpoint ?? null,
+            warnings,
+        };
+    }
+
+    /**
      * Find the Kuma user for a verified identity.
      * 1. An active user already linked to the identity.
      * 2. If `autoLink` is on, the local user whose username equals `preferred_username`; the identity is linked to it.

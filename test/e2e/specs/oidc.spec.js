@@ -209,3 +209,120 @@ test.describe("OIDC login", () => {
         expect(await page.evaluate(() => localStorage.token)).toBeUndefined();
     });
 });
+
+/**
+ * Open the OIDC settings page as the admin.
+ * @param {Page} page Page
+ * @returns {Promise<void>}
+ */
+async function openSettings(page) {
+    await page.goto("./settings/oidc");
+    await login(page);
+    await expect(page.getByTestId("oidc-status")).toBeVisible();
+}
+
+test.describe("OIDC settings", () => {
+    test.beforeAll(async () => {
+        await provider.start(PROVIDER_PORT);
+    });
+
+    test.afterAll(async () => {
+        provider.stop();
+        await restoreSqliteSnapshot();
+    });
+
+    test.beforeEach(async () => {
+        await restoreSqliteSnapshot();
+        provider.claims = {};
+    });
+
+    test("shows a disabled, empty configuration with the default redirect URI", async ({ page }, testInfo) => {
+        await openSettings(page);
+
+        await expect(page.getByTestId("oidc-status")).toHaveText("OIDC: Disabled");
+        await expect(page.getByTestId("oidc-errors")).toContainText("Client ID is required");
+        await expect(page.locator("#oidc-redirect-uri")).toHaveValue(`${url}/auth/oidc/callback`);
+        await expect(page.getByTestId("oidc-not-linked")).toBeVisible();
+        await screenshot(testInfo, page);
+    });
+
+    test("configures OIDC, signs in with it, then unlinks the account", async ({ page }, testInfo) => {
+        provider.claims = { preferred_username: "admin" };
+        await openSettings(page);
+
+        await page.locator("#oidc-issuer").fill(provider.issuer);
+        await page.getByTestId("oidc-test").click();
+        await expect(page.getByTestId("oidc-test-result")).toContainText(`Connected to ${provider.issuer}`);
+
+        await page.locator("#oidc-client-id").fill("kuma");
+        await page.locator("#oidc-client-secret input").fill("secret");
+        await page.locator("#oidc-auto-link").check();
+        await page.getByLabel("Enable OIDC login").check();
+        await page.locator("#oidc-current-password").fill("admin123");
+        await screenshot(testInfo, page);
+        await page.getByTestId("oidc-save").click();
+
+        await expect(page.getByTestId("oidc-status")).toHaveText("OIDC: Enabled");
+        // The secret is write-only
+        await expect(page.locator("#oidc-client-secret input")).toHaveValue("");
+        await expect(page.locator("#oidc-client-secret input")).toHaveAttribute("placeholder", "Unchanged");
+
+        await logout(page);
+        await loginWithOIDC(page);
+
+        await page.goto("./settings/oidc");
+        await expect(page.getByTestId("oidc-linked")).toContainText(provider.issuer);
+        await screenshot(testInfo, page);
+
+        await page.getByTestId("oidc-unlink").click();
+        await page.locator("#oidc-unlink-password").fill("admin123");
+        await page.locator(".modal").getByRole("button", { name: "Unlink" }).click();
+        await expect(page.getByTestId("oidc-not-linked")).toBeVisible();
+    });
+
+    test("a wrong password does not enable OIDC", async ({ page }) => {
+        await openSettings(page);
+
+        await page.locator("#oidc-issuer").fill(provider.issuer);
+        await page.locator("#oidc-client-id").fill("kuma");
+        await page.locator("#oidc-client-secret input").fill("secret");
+        await page.getByLabel("Enable OIDC login").check();
+        await page.locator("#oidc-current-password").fill("not-the-password");
+        await page.getByTestId("oidc-save").click();
+
+        await expect(page.getByText("Incorrect current password")).toBeVisible();
+        await expect(page.getByTestId("oidc-status")).toHaveText("OIDC: Disabled");
+    });
+
+    test("an incomplete configuration cannot be enabled", async ({ page }) => {
+        await openSettings(page);
+
+        await page.getByLabel("Enable OIDC login").check();
+        await page.locator("#oidc-current-password").fill("admin123");
+        await page.getByTestId("oidc-save").click();
+
+        await expect(page.getByText("Invalid OIDC configuration")).toBeVisible();
+        await expect(page.getByTestId("oidc-status")).toHaveText("OIDC: Disabled");
+    });
+
+    test("disabling OIDC needs no password", async ({ page }) => {
+        await configureOIDC();
+        await openSettings(page);
+        await expect(page.getByTestId("oidc-status")).toHaveText("OIDC: Enabled");
+
+        await page.getByLabel("Enable OIDC login").uncheck();
+        await expect(page.locator("#oidc-current-password")).toHaveCount(0);
+        await page.getByTestId("oidc-save").click();
+
+        await expect(page.getByTestId("oidc-status")).toHaveText("OIDC: Disabled");
+    });
+
+    test("the connection test reports an unreachable provider", async ({ page }) => {
+        await openSettings(page);
+
+        await page.locator("#oidc-issuer").fill("http://127.0.0.1:1");
+        await page.getByTestId("oidc-test").click();
+
+        await expect(page.getByTestId("oidc-test-result")).toContainText("Could not reach the identity provider");
+    });
+});

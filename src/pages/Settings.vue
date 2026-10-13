@@ -112,6 +112,9 @@ export default {
                 security: {
                     title: this.$t("Security"),
                 },
+                oidc: {
+                    title: this.$t("oidcMenu"),
+                },
                 "api-keys": {
                     title: this.$t("API Keys"),
                 },

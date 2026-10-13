@@ -85,6 +85,19 @@ class User extends BeanModel {
     }
 
     /**
+     * OIDC: remove the link to the external identity
+     * @returns {Promise<void>}
+     */
+    async unlinkOIDC() {
+        await R.exec("UPDATE `user` SET oidc_sub = NULL, oidc_issuer = NULL, last_oidc_login = NULL WHERE id = ? ", [
+            this.id,
+        ]);
+        this.oidc_sub = null;
+        this.oidc_issuer = null;
+        this.last_oidc_login = null;
+    }
+
+    /**
      * OIDC: metadata about the linked identity
      * @returns {{linked: boolean, sub: ?string, issuer: ?string, lastLogin: ?string}} Link status
      */
