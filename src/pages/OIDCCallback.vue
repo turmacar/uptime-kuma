@@ -10,6 +10,15 @@
                 <div class="alert alert-danger" role="alert" data-cy="oidc-callback-error">
                     {{ $t(errorMessageKey) }}
                 </div>
+                <a
+                    v-if="verifyEmailUrl"
+                    :href="verifyEmailUrl"
+                    rel="noopener noreferrer"
+                    class="w-100 btn btn-outline-primary mb-2"
+                    data-cy="oidc-verify-email"
+                >
+                    {{ $t("oidcVerifyEmail") }}
+                </a>
                 <router-link to="/dashboard" class="w-100 btn btn-primary">
                     {{ $t("oidcBackToLogin") }}
                 </router-link>
@@ -26,6 +35,8 @@
 </template>
 
 <script>
+import axios from "axios";
+
 // Codes come from the server redirect (`#error=<code>`); anything else is shown as "unknown".
 const ERROR_MESSAGES = {
     no_session: "oidcErrorNoSession",
@@ -48,6 +59,7 @@ export default {
             ticket: null,
             errorCode: null,
             redeemed: false,
+            verifyEmailUrl: null,
         };
     },
 
@@ -80,6 +92,9 @@ export default {
 
         if (error) {
             this.errorCode = error;
+            if (error === "email_not_verified") {
+                this.loadVerifyEmailUrl();
+            }
             return;
         }
         if (!ticket) {
@@ -97,6 +112,22 @@ export default {
     },
 
     methods: {
+        /**
+         * Fetch the optional link to the provider's email verification page. Only http(s) links are used.
+         * @returns {Promise<void>}
+         */
+        async loadVerifyEmailUrl() {
+            try {
+                const res = await axios.get("/auth/oidc/status");
+                const url = new URL(res.data?.verifyEmailUrl);
+                if (url.protocol === "https:" || url.protocol === "http:") {
+                    this.verifyEmailUrl = url.href;
+                }
+            } catch (e) {
+                this.verifyEmailUrl = null;
+            }
+        },
+
         /**
          * Exchange the ticket for a login, once
          * @returns {void}

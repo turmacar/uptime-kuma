@@ -6,7 +6,7 @@ const oidcConfig = require("../oidc-config");
 const { oidcHandler } = require("../oidc-handler");
 
 const BOOLEAN_FIELDS = ["enabled", "autoLink", "requireEmailVerified"];
-const STRING_FIELDS = ["clientId", "clientSecret", "issuer", "redirectUri"];
+const STRING_FIELDS = ["clientId", "clientSecret", "issuer", "redirectUri", "verifyEmailUrl"];
 
 /**
  * Take only the known settings from the client payload and check their types.

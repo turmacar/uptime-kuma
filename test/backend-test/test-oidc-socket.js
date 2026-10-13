@@ -218,6 +218,7 @@ describe("OIDC settings socket events", () => {
             { enabled: false, autoLink: "yes" },
             { enabled: false, scopes: "openid" },
             { enabled: false, scopes: [1] },
+            { enabled: false, verifyEmailUrl: 5 },
         ];
         for (const payload of bad) {
             const res = await socket.call("setOIDCSettings", payload, PASSWORD);
@@ -225,6 +226,24 @@ describe("OIDC settings socket events", () => {
         }
         assert.strictEqual(resets, 0);
         assert.strictEqual((await R.getAll("SELECT key FROM setting WHERE type = 'oidc'")).length, 0);
+    });
+
+    test("the email verification link is saved and returned, and a non-http(s) one is refused", async () => {
+        await loginAs("alice");
+        const link = "https://auth.example.com/if/user/";
+
+        const saved = await socket.call("setOIDCSettings", validSettings({ verifyEmailUrl: link }), PASSWORD);
+        assert.strictEqual(saved.ok, true);
+        assert.strictEqual((await socket.call("getOIDCSettings")).config.verifyEmailUrl, link);
+
+        const bad = await socket.call(
+            "setOIDCSettings",
+            validSettings({ verifyEmailUrl: "javascript:alert(1)" }),
+            PASSWORD
+        );
+        assert.strictEqual(bad.ok, false);
+        assert.match(bad.msg, /Email verification link must be an http\(s\) URL/);
+        assert.strictEqual((await socket.call("getOIDCSettings")).config.verifyEmailUrl, link);
     });
 
     test("unknown fields in the payload are ignored", async () => {

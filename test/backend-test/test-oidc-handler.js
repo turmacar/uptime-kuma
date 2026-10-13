@@ -1,6 +1,7 @@
 const { describe, test, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert");
 const crypto = require("crypto");
+const { log } = require("../../src/util");
 const { OIDCHandler } = require("../../server/oidc-handler");
 const { FakeProvider } = require("./helpers/fake-oidc-provider");
 
@@ -158,6 +159,22 @@ describe("OIDC handler", () => {
             handler.handleCallback(config, { code: "good-code", state: checks.state }, checks),
             (e) => e.code === "email_not_verified"
         );
+    });
+
+    test("a lenient sign-in without a verified email is allowed and logged as a warning", async () => {
+        const lines = [];
+        log.warn = (...args) => lines.push(args.join(" "));
+        try {
+            const { checks } = await begin();
+            provider.claims = { email_verified: false };
+            const identity = await handler.handleCallback(config, { code: "good-code", state: checks.state }, checks);
+            assert.strictEqual(identity.emailVerified, false);
+        } finally {
+            delete log.warn;
+        }
+
+        assert.ok(lines.some((l) => l.includes("without a verified email") && l.includes("user-1")));
+        assert.ok(!lines.join("\n").includes("me@example.com"));
     });
 
     test("surfaces a provider error without a token request", async () => {

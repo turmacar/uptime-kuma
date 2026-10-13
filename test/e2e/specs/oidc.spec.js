@@ -32,15 +32,17 @@ function runSql(sql) {
  * @param {object} options Options
  * @param {boolean} options.enabled Value of oidc_enabled
  * @param {boolean} options.linked Link the admin user to the provider's identity
+ * @param {object} options.extra More `oidc_*` settings, keyed by setting name
  * @returns {Promise<void>}
  */
-function configureOIDC({ enabled = true, linked = true } = {}) {
+function configureOIDC({ enabled = true, linked = true, extra = {} } = {}) {
     const settings = {
         oidc_enabled: enabled,
         oidc_client_id: "kuma",
         oidc_client_secret: "secret",
         oidc_issuer: provider.issuer,
         oidc_redirect_uri: `${url}/auth/oidc/callback`,
+        ...extra,
     };
     const rows = Object.entries(settings)
         .map(([key, value]) => `('${key}', '${JSON.stringify(value)}', 'oidc')`)
@@ -200,6 +202,44 @@ test.describe("OIDC login", () => {
         await expect(page.getByText("Add New Monitor")).toBeVisible();
     });
 
+    test("an unverified email offers the provider's verification link when one is configured", async ({ page }) => {
+        await configureOIDC({
+            extra: {
+                oidc_require_email_verified: true,
+                oidc_verify_email_url: "https://auth.example.com/if/user/",
+            },
+        });
+        provider.claims = { email_verified: false };
+        await openLoginPage(page);
+
+        const status = page.waitForResponse("**/auth/oidc/status");
+        await page.getByRole("button", { name: "Login with Authentik" }).click();
+        await status;
+
+        await expect(page.getByRole("alert")).toHaveText(
+            "Your email address is not verified at the identity provider."
+        );
+        await expect(page.getByRole("link", { name: "Verify your email at the provider" })).toHaveAttribute(
+            "href",
+            "https://auth.example.com/if/user/"
+        );
+    });
+
+    test("an unverified email shows no verification link when none is configured", async ({ page }) => {
+        await configureOIDC({ extra: { oidc_require_email_verified: true } });
+        provider.claims = { email_verified: false };
+        await openLoginPage(page);
+
+        const status = page.waitForResponse("**/auth/oidc/status");
+        await page.getByRole("button", { name: "Login with Authentik" }).click();
+        await status;
+
+        await expect(page.getByRole("alert")).toHaveText(
+            "Your email address is not verified at the identity provider."
+        );
+        await expect(page.getByRole("link", { name: "Verify your email at the provider" })).toHaveCount(0);
+    });
+
     test("an invalid stored token shows the login page", async ({ page }) => {
         await configureOIDC();
         await page.addInitScript(() => localStorage.setItem("token", "not-a-valid-token"));
@@ -315,6 +355,23 @@ test.describe("OIDC settings", () => {
         await page.getByTestId("oidc-save").click();
 
         await expect(page.getByTestId("oidc-status")).toHaveText("OIDC: Disabled");
+    });
+
+    test("saves the email verification link and refuses a non-http(s) one", async ({ page }) => {
+        await configureOIDC();
+        await openSettings(page);
+
+        await page.locator("#oidc-verify-email-url").fill("javascript:alert(1)");
+        await page.locator("#oidc-current-password").fill("admin123");
+        await page.getByTestId("oidc-save").click();
+        await expect(page.getByText("Email verification link must be an http(s) URL")).toBeVisible();
+
+        await page.locator("#oidc-verify-email-url").fill("https://auth.example.com/if/user/");
+        await page.getByTestId("oidc-save").click();
+        await expect(page.getByText("Saved.")).toBeVisible();
+
+        await page.reload();
+        await expect(page.locator("#oidc-verify-email-url")).toHaveValue("https://auth.example.com/if/user/");
     });
 
     test("the connection test reports an unreachable provider", async ({ page }) => {

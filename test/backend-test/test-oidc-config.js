@@ -18,7 +18,20 @@ describe("OIDC config: parsing and validation", () => {
         assert.strictEqual(config.enabled, false);
         assert.strictEqual(config.autoLink, false);
         assert.strictEqual(config.requireEmailVerified, false);
+        assert.strictEqual(config.verifyEmailUrl, "");
         assert.deepStrictEqual(config.scopes, ["openid", "profile", "email"]);
+    });
+
+    test("the email verification link is optional and must be http(s)", () => {
+        assert.deepStrictEqual(oidcConfig.validate({ ...VALID, verifyEmailUrl: "" }), []);
+        assert.deepStrictEqual(
+            oidcConfig.validate({ ...VALID, verifyEmailUrl: "https://auth.example.com/if/user/" }),
+            []
+        );
+        for (const url of ["javascript:alert(1)", "data:text/html,x", "ftp://example.com", "not a url"]) {
+            const errors = oidcConfig.validate({ ...VALID, verifyEmailUrl: url });
+            assert.deepStrictEqual(errors, ["Email verification link must be an http(s) URL"], url);
+        }
     });
 
     test("scopes always include openid and are de-duplicated", () => {
@@ -80,6 +93,18 @@ describe("OIDC config: load and save", () => {
         assert.deepStrictEqual(errors, []);
         assert.strictEqual(config.enabled, true);
         assert.strictEqual(config.clientSecret, VALID.clientSecret);
+    });
+
+    test("the email verification link is saved, kept when omitted, and an invalid one blocks enabling", async () => {
+        const link = "https://auth.example.com/if/user/";
+        await oidcConfig.save({ ...VALID, verifyEmailUrl: link });
+        assert.strictEqual((await oidcConfig.load()).config.verifyEmailUrl, link);
+
+        await oidcConfig.save({ clientId: "renamed" });
+        assert.strictEqual((await oidcConfig.load()).config.verifyEmailUrl, link);
+
+        await assert.rejects(oidcConfig.save({ verifyEmailUrl: "javascript:alert(1)" }), /Email verification link/);
+        assert.strictEqual((await oidcConfig.load()).config.verifyEmailUrl, link);
     });
 
     test("save without a secret keeps the stored one", async () => {

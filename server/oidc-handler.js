@@ -132,8 +132,14 @@ class OIDCHandler {
         }
 
         const emailVerified = claims.email_verified === true;
-        if (config.requireEmailVerified && !emailVerified) {
-            throw new OIDCError("email_not_verified", "Your email address is not verified at the identity provider");
+        if (!emailVerified) {
+            if (config.requireEmailVerified) {
+                throw new OIDCError(
+                    "email_not_verified",
+                    "Your email address is not verified at the identity provider"
+                );
+            }
+            log.warn("oidc", `Identity ${claims.sub} signed in without a verified email`);
         }
 
         return {

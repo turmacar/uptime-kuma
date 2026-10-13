@@ -120,6 +120,21 @@ describe("OIDC router", () => {
         assert.deepStrictEqual(await (await get("/auth/oidc/status")).json(), { enabled: false });
     });
 
+    test("status only exposes the email verification link while OIDC is enabled", async () => {
+        config.verifyEmailUrl = "https://auth.example.com/if/user/";
+        assert.deepStrictEqual(await (await get("/auth/oidc/status")).json(), {
+            enabled: true,
+            verifyEmailUrl: "https://auth.example.com/if/user/",
+        });
+
+        config.verifyEmailUrl = "";
+        assert.deepStrictEqual(await (await get("/auth/oidc/status")).json(), { enabled: true });
+
+        config.verifyEmailUrl = "https://auth.example.com/if/user/";
+        config.enabled = false;
+        assert.deepStrictEqual(await (await get("/auth/oidc/status")).json(), { enabled: false });
+    });
+
     test("status is not blocked by the OIDC rate limit", async () => {
         allow = false;
         assert.strictEqual((await get("/auth/oidc/status")).status, 200);

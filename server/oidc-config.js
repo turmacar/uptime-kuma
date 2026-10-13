@@ -33,6 +33,7 @@ function fromRaw(raw) {
         scopes: parseScopes(raw.oidc_scopes),
         autoLink: raw.oidc_auto_link === true,
         requireEmailVerified: raw.oidc_require_email_verified === true,
+        verifyEmailUrl: String(raw.oidc_verify_email_url ?? "").trim(),
     };
 }
 
@@ -74,6 +75,11 @@ function validate(config) {
 
     if (!parseHttpUrl(config.redirectUri)) {
         errors.push("Redirect URI must be an http(s) URL");
+    }
+
+    // Optional, shown as a link on the login error page
+    if (config.verifyEmailUrl && !parseHttpUrl(config.verifyEmailUrl)) {
+        errors.push("Email verification link must be an http(s) URL");
     }
 
     return errors;
@@ -147,6 +153,7 @@ async function save(input) {
         oidc_scopes: merged.scopes.join(","),
         oidc_auto_link: !!merged.autoLink,
         oidc_require_email_verified: !!merged.requireEmailVerified,
+        oidc_verify_email_url: String(merged.verifyEmailUrl ?? "").trim(),
     });
 
     log.info("oidc", "Configuration saved: " + JSON.stringify(sanitize(merged)));

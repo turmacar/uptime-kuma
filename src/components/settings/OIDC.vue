@@ -127,6 +127,19 @@
                 </div>
                 <div class="form-text mb-4">{{ $t("oidcRequireEmailVerifiedHelp") }}</div>
 
+                <div class="mb-4">
+                    <label for="oidc-verify-email-url" class="form-label">{{ $t("oidcVerifyEmailUrl") }}</label>
+                    <input
+                        id="oidc-verify-email-url"
+                        v-model="form.verifyEmailUrl"
+                        type="url"
+                        class="form-control"
+                        placeholder="https://auth.example.com/if/user/"
+                        data-testid="oidc-verify-email-url"
+                    />
+                    <div class="form-text">{{ $t("oidcVerifyEmailUrlHelp") }}</div>
+                </div>
+
                 <div v-if="form.enabled" class="mb-4">
                     <label for="oidc-current-password" class="form-label">{{ $t("Current Password") }}</label>
                     <input
@@ -215,6 +228,7 @@ export default {
                 scopes: "openid profile email",
                 autoLink: false,
                 requireEmailVerified: false,
+                verifyEmailUrl: "",
             },
             hasClientSecret: false,
             savedEnabled: false,
@@ -255,6 +269,7 @@ export default {
                     scopes: config.scopes.join(" "),
                     autoLink: config.autoLink,
                     requireEmailVerified: config.requireEmailVerified,
+                    verifyEmailUrl: config.verifyEmailUrl ?? "",
                 };
                 this.hasClientSecret = config.hasClientSecret;
                 this.savedEnabled = config.enabled;
@@ -279,6 +294,7 @@ export default {
                 ...this.form,
                 issuer: this.form.issuer.trim(),
                 redirectUri: this.form.redirectUri.trim(),
+                verifyEmailUrl: this.form.verifyEmailUrl.trim(),
                 scopes: this.form.scopes.split(/[\s,]+/).filter(Boolean),
             };
 

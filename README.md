@@ -55,7 +55,8 @@ Quick start:
 | Redirect URI              | Callback URL, must match the provider exactly                                                    |
 | Scopes                    | `openid` is always included                                                                      |
 | Link accounts by username | Link the Kuma user whose username equals the provider's `preferred_username`, first sign-in only |
-| Require a verified email  | Refuse sign-ins without `email_verified`                                                         |
+| Require a verified email  | Refuse sign-ins without `email_verified` (otherwise only a warning is logged)                    |
+| Email verification link   | Optional button on the error page for unverified emails                                          |
 
 More detail, security notes and troubleshooting: [docs/OIDC.md](docs/OIDC.md).
 

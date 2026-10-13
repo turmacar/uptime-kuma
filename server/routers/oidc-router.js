@@ -109,7 +109,11 @@ function createOIDCRouter({
         res.set("Cache-Control", "no-store");
         try {
             const { config } = await loadConfig();
-            res.json({ enabled: config.enabled });
+            // The email verification link is only a pointer to the provider, shown after a refused sign-in
+            res.json({
+                enabled: config.enabled,
+                ...(config.enabled && config.verifyEmailUrl ? { verifyEmailUrl: config.verifyEmailUrl } : {}),
+            });
         } catch (e) {
             log.error("oidc", "Could not load the configuration: " + e.message);
             res.json({ enabled: false });
