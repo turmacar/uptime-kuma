@@ -13,12 +13,13 @@ class FakeProvider {
     tokenRequests = 0;
 
     /**
-     * Listen on a random local port.
+     * Listen on a local port (random unless given).
+     * @param {number} port Port to listen on
      * @returns {Promise<void>}
      */
-    async start() {
+    async start(port = 0) {
         this.server = http.createServer((req, res) => this.handle(req, res));
-        await new Promise((resolve) => this.server.listen(0, "127.0.0.1", resolve));
+        await new Promise((resolve) => this.server.listen(port, "127.0.0.1", resolve));
         this.issuer = `http://127.0.0.1:${this.server.address().port}`;
     }
 
@@ -59,6 +60,16 @@ class FakeProvider {
                 subject_types_supported: ["public"],
                 id_token_signing_alg_values_supported: ["RS256"],
             });
+        }
+        if (req.url.startsWith("/authorize")) {
+            // Approve immediately, like a browser session that is already signed in
+            const query = new URL(req.url, this.issuer).searchParams;
+            this.expected = { nonce: query.get("nonce"), challenge: query.get("code_challenge") };
+            const back = new URL(query.get("redirect_uri"));
+            back.searchParams.set("code", "good-code");
+            back.searchParams.set("state", query.get("state"));
+            res.writeHead(302, { location: back.toString() });
+            return res.end();
         }
         if (req.url === "/jwks") {
             const jwk = { ...this.keys.publicKey.export({ format: "jwk" }), kid: "k1", use: "sig", alg: "RS256" };

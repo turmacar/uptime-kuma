@@ -438,6 +438,25 @@ export default {
         },
 
         /**
+         * Log in with the one-time ticket from the OIDC callback
+         * @param {string} ticket Ticket from the callback redirect
+         * @param {loginCB} callback Callback to call with result
+         * @returns {void}
+         */
+        loginByOIDCTicket(ticket, callback) {
+            socket.emit("loginByOIDCTicket", ticket, (res) => {
+                if (res.ok) {
+                    this.storage().token = res.token;
+                    this.socket.token = res.token;
+                    this.loggedIn = true;
+                    this.username = this.getJWTPayload()?.username;
+                }
+
+                callback(res);
+            });
+        },
+
+        /**
          * Log in using a token
          * @param {string} token Token to log in with
          * @returns {void}

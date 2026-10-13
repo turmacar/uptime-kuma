@@ -19,6 +19,7 @@ import DockerHosts from "./components/settings/Docker.vue";
 import ManageMaintenance from "./pages/ManageMaintenance.vue";
 import APIKeys from "./components/settings/APIKeys.vue";
 import SetupDatabase from "./pages/SetupDatabase.vue";
+import OIDCCallback from "./pages/OIDCCallback.vue";
 
 // Settings - Sub Pages
 import Appearance from "./components/settings/Appearance.vue";
@@ -172,6 +173,10 @@ const routes = [
     {
         path: "/setup-database",
         component: SetupDatabase,
+    },
+    {
+        path: "/oidc-callback",
+        component: OIDCCallback,
     },
     {
         path: "/status-page",
