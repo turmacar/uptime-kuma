@@ -11,6 +11,10 @@ class FakeProvider {
     claims = {};
     signingKey = this.keys.privateKey;
     tokenRequests = 0;
+    // When set, each /authorize call gets its own single-use code and subject (user-1, user-2, ...)
+    concurrent = false;
+    codes = new Map();
+    authorizeCount = 0;
 
     /**
      * Listen on a local port (random unless given).
@@ -65,8 +69,14 @@ class FakeProvider {
             // Approve immediately, like a browser session that is already signed in
             const query = new URL(req.url, this.issuer).searchParams;
             this.expected = { nonce: query.get("nonce"), challenge: query.get("code_challenge") };
+            let code = "good-code";
+            if (this.concurrent) {
+                this.authorizeCount++;
+                code = `code-${this.authorizeCount}`;
+                this.codes.set(code, { ...this.expected, sub: `user-${this.authorizeCount}` });
+            }
             const back = new URL(query.get("redirect_uri"));
-            back.searchParams.set("code", "good-code");
+            back.searchParams.set("code", code);
             back.searchParams.set("state", query.get("state"));
             res.writeHead(302, { location: back.toString() });
             return res.end();
@@ -85,16 +95,20 @@ class FakeProvider {
                     .createHash("sha256")
                     .update(form.get("code_verifier") ?? "")
                     .digest("base64url");
-                if (form.get("code") !== "good-code" || challenge !== this.expected.challenge) {
+                const code = form.get("code");
+                const entry = this.codes.get(code);
+                const expected = entry ?? (code === "good-code" ? this.expected : null);
+                if (!expected || challenge !== expected.challenge) {
                     return this.json(res, 400, { error: "invalid_grant" });
                 }
+                this.codes.delete(code);
                 const now = Math.floor(Date.now() / 1000);
                 const idToken = jwt.sign(
                     {
                         iss: this.issuer,
                         aud: "kuma",
-                        sub: "user-1",
-                        nonce: this.expected.nonce,
+                        sub: entry?.sub ?? "user-1",
+                        nonce: expected.nonce,
                         iat: now,
                         exp: now + 300,
                         email: "me@example.com",

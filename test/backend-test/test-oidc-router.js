@@ -13,7 +13,7 @@ describe("OIDC router", () => {
     let base;
     let config;
     const handler = new OIDCHandler();
-    const tickets = new ExpiringStore({ ttlMs: 60000, maxEntries: 10 });
+    const tickets = new ExpiringStore({ ttlMs: 60000, maxEntries: 100 });
     let allow;
     let logged;
 
@@ -319,6 +319,81 @@ describe("OIDC router", () => {
         assert.ok(line);
         assert.ok(!/[\r\n]/.test(line));
         assert.ok(line.length < 500, `line is ${line.length} characters`);
+    });
+
+    test("attacker-supplied redirect parameters never change where the browser is sent", async () => {
+        const evil = "https://evil.example.com/";
+        const login = await get(
+            `/auth/oidc/login?redirect_uri=${evil}&next=${evil}&url=${evil}&returnTo=//evil.example.com`
+        );
+        const authorize = new URL(login.headers.get("location"));
+        assert.strictEqual(authorize.origin, provider.issuer);
+        assert.strictEqual(authorize.searchParams.get("redirect_uri"), config.redirectUri);
+
+        const { state, cookie } = await startLogin();
+        const extra = `redirect_uri=${evil}&next=${evil}&url=${evil}`;
+        const ok = await get(`/auth/oidc/callback?code=good-code&state=${state}&${extra}`, cookie);
+        assert.match(ok.headers.get("location"), /^\/oidc-callback#ticket=/);
+
+        const failed = await get(`/auth/oidc/callback?code=good-code&state=unknown&${extra}`, cookie);
+        assert.match(failed.headers.get("location"), /^\/oidc-callback#error=no_session$/);
+    });
+
+    test("handles many concurrent logins without mixing them up", async () => {
+        provider.concurrent = true;
+        provider.authorizeCount = 0;
+        provider.codes.clear();
+        handler.resolveUser = async (cfg, identity) => ({
+            id: Number(identity.sub.split("-")[1]),
+            username: identity.sub,
+        });
+        const count = 50;
+        const started = Date.now();
+
+        let ticketList;
+        try {
+            ticketList = await Promise.all(
+                Array.from({ length: count }, async () => {
+                    const login = await get("/auth/oidc/login");
+                    const cookie = login.headers.getSetCookie()[0].split(";")[0];
+                    const authorize = await fetch(login.headers.get("location"), { redirect: "manual" });
+                    const callback = new URL(authorize.headers.get("location"));
+                    const res = await get(callback.pathname + callback.search, cookie);
+                    return fragment(res).get("ticket");
+                })
+            );
+        } finally {
+            provider.concurrent = false;
+        }
+        console.log(`    ${count} concurrent logins took ${Date.now() - started} ms`);
+
+        const users = await Promise.all(
+            ticketList.map((ticket) =>
+                redeemOIDCTicket(ticket, {
+                    tickets,
+                    loadConfig: async () => ({ config }),
+                    findUser: async (id) => ({ id }),
+                })
+            )
+        );
+        assert.deepStrictEqual(
+            users.map((u) => u.id).sort((a, b) => a - b),
+            Array.from({ length: count }, (_, i) => i + 1)
+        );
+        assert.strictEqual(new Set(ticketList).size, count);
+    });
+
+    test("pending logins are bounded and the oldest are dropped first", async () => {
+        const first = await startLogin();
+        for (let i = 0; i < 520; i++) {
+            await get("/auth/oidc/login");
+        }
+        const dropped = await get(`/auth/oidc/callback?code=good-code&state=${first.state}`, first.cookie);
+        assert.strictEqual(fragment(dropped).get("error"), "no_session");
+
+        const last = await startLogin();
+        const ok = await get(`/auth/oidc/callback?code=good-code&state=${last.state}`, last.cookie);
+        assert.ok(fragment(ok).get("ticket"));
     });
 
     test("an unexpected error is reported as server_error", async () => {
