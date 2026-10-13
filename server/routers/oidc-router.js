@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const express = require("express");
 const { R } = require("redbean-node");
 const { log } = require("../../src/util");
+const { allowDevAllOrigin } = require("../util-server");
 const oidcConfig = require("../oidc-config");
 const { oidcHandler, OIDCError } = require("../oidc-handler");
 const { ExpiringStore, oidcTickets } = require("../oidc-store");
@@ -79,6 +80,18 @@ function createOIDCRouter({
     const finish = (res, params) => {
         res.redirect(`${RESULT_PATH}#${new URLSearchParams(params).toString()}`);
     };
+
+    router.get("/auth/oidc/status", async (req, res) => {
+        allowDevAllOrigin(res);
+        res.set("Cache-Control", "no-store");
+        try {
+            const { config } = await loadConfig();
+            res.json({ enabled: config.enabled });
+        } catch (e) {
+            log.error("oidc", "Could not load the configuration: " + e.message);
+            res.json({ enabled: false });
+        }
+    });
 
     router.use("/auth/oidc", async (req, res, next) => {
         res.set("Cache-Control", "no-store");

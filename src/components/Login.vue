@@ -61,6 +61,16 @@
                     {{ $t("Login") }}
                 </button>
 
+                <button
+                    v-if="oidcEnabled && !tokenRequired"
+                    class="w-100 btn btn-outline-primary mt-3"
+                    type="button"
+                    :disabled="processing || oidcRedirecting"
+                    @click="loginWithOIDC"
+                >
+                    {{ oidcRedirecting ? $t("oidcRedirecting") : $t("oidcLogin") }}
+                </button>
+
                 <div v-if="res && !res.ok" class="alert alert-danger mt-3" role="alert">
                     {{ $t(res.msg) }}
                 </div>
@@ -70,6 +80,7 @@
 </template>
 
 <script>
+import axios from "axios";
 import HiddenInput from "./HiddenInput.vue";
 
 export default {
@@ -84,6 +95,8 @@ export default {
             token: "",
             res: null,
             tokenRequired: false,
+            oidcEnabled: false,
+            oidcRedirecting: false,
         };
     },
 
@@ -99,13 +112,49 @@ export default {
 
     mounted() {
         document.title += " - Login";
+        this.loadOIDCStatus();
+        window.addEventListener("pageshow", this.resetOIDCRedirecting);
     },
 
     unmounted() {
         document.title = document.title.replace(" - Login", "");
+        window.removeEventListener("pageshow", this.resetOIDCRedirecting);
     },
 
     methods: {
+        /**
+         * Ask the server whether OIDC login is enabled
+         * @returns {Promise<void>}
+         */
+        async loadOIDCStatus() {
+            try {
+                const res = await axios.get("/auth/oidc/status");
+                this.oidcEnabled = res.data?.enabled === true;
+            } catch (e) {
+                this.oidcEnabled = false;
+            }
+        },
+
+        /**
+         * Leave for the identity provider via the server
+         * @returns {void}
+         */
+        loginWithOIDC() {
+            this.oidcRedirecting = true;
+            window.location.assign((axios.defaults.baseURL ?? "") + "/auth/oidc/login");
+        },
+
+        /**
+         * Re-enable the button when the page is restored from the back/forward cache
+         * @param {PageTransitionEvent} event pageshow event
+         * @returns {void}
+         */
+        resetOIDCRedirecting(event) {
+            if (event.persisted) {
+                this.oidcRedirecting = false;
+            }
+        },
+
         /**
          * Submit the user details and attempt to log in
          * @returns {void}

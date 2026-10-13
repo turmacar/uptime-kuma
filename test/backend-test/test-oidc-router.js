@@ -98,6 +98,21 @@ describe("OIDC router", () => {
         return new URLSearchParams(location.split("#")[1]);
     }
 
+    test("status tells the login page whether OIDC is enabled and nothing else", async () => {
+        const on = await get("/auth/oidc/status");
+        assert.strictEqual(on.status, 200);
+        assert.strictEqual(on.headers.get("cache-control"), "no-store");
+        assert.deepStrictEqual(await on.json(), { enabled: true });
+
+        config.enabled = false;
+        assert.deepStrictEqual(await (await get("/auth/oidc/status")).json(), { enabled: false });
+    });
+
+    test("status is not blocked by the OIDC rate limit", async () => {
+        allow = false;
+        assert.strictEqual((await get("/auth/oidc/status")).status, 200);
+    });
+
     test("is a 404 while OIDC is disabled", async () => {
         config.enabled = false;
         assert.strictEqual((await get("/auth/oidc/login")).status, 404);

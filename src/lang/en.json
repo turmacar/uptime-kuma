@@ -165,6 +165,8 @@
     "Password": "Password",
     "Remember me": "Remember me",
     "Login": "Log in",
+    "oidcLogin": "Login with Authentik",
+    "oidcRedirecting": "Redirecting...",
     "No Monitors, please": "No Monitors, please",
     "add one": "add one",
     "Notification Type": "Notification Type",
